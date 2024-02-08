@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use once_cell::sync::Lazy;
-use regex::{Match, Regex};
+use regex::{Match, Matches, Regex};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use unicode_segmentation::UnicodeSegmentation;
@@ -9,7 +9,9 @@ mod languages;
 use languages::SUPPORTED_LANGUAGES;
 
 mod constants;
-pub(crate) use constants::{DEFAULT_FALLBACK_LANGUAGE, GLOBAL_SENTENCE_TERMINATORS, LANGDATA_STR, LANGUAGE_FALLBACKS, QUOTE_PAIRS_ARRAY};
+pub(crate) use constants::{
+    GLOBAL_SENTENCE_TERMINATORS, LANGDATA_STR, LANGUAGE_FALLBACKS, QUOTE_PAIRS_ARRAY,
+};
 
 pub static LANGUAGE_REGISTRY: Lazy<HashMap<&'static str, &(dyn Language + Send + Sync + 'static)>> =
     Lazy::new(|| {
@@ -59,11 +61,11 @@ fn get_language(lang_code: &str) -> Option<&(dyn Language + Send + Sync + 'stati
         let fallbacks = LANGUAGE_FALLBACKS
             .get(lang_code)
             .cloned()
-            .unwrap_or(DEFAULT_FALLBACK_LANGUAGE.to_vec());
+            .unwrap_or(["en"].to_vec());
         for fallback_language in fallbacks {
             ret_lang = get_language(fallback_language);
             if ret_lang.is_some() {
-                break
+                break;
             }
         }
     }
@@ -169,11 +171,7 @@ pub trait Language {
     fn segment(&self, text: &str) -> Vec<String> {
         let mut sentences = Vec::new();
 
-        for paragraph in CONSECUTIVE_NEWLINES_REGEX.split(text) {
-            // XXX: here to make test pass
-            if !sentences.is_empty() {
-                sentences.push("\n\n".to_string())
-            }
+        for paragraph in CONSECUTIVE_NEWLINES_REGEX.split_inclusive(text) {
             let grapheme_indices: HashMap<usize, &str> =
                 paragraph.grapheme_indices(false).collect();
             let mut grapheme_offsets: Vec<usize> = grapheme_indices.keys().copied().collect();
@@ -282,6 +280,57 @@ pub trait Language {
     }
 }
 
+struct RegexSplitInclusive<'r, 's> {
+    matches: Matches<'r, 's>,
+    remaining: &'s str,
+    pending_separator: Option<&'s str>,
+}
+
+impl<'r, 's> RegexSplitInclusive<'r, 's> {
+    fn new(reg: &'r Regex, text: &'s str) -> Self {
+        Self {
+            matches: reg.find_iter(text),
+            remaining: text,
+            pending_separator: None,
+        }
+    }
+}
+
+impl<'r, 's> std::iter::Iterator for RegexSplitInclusive<'r, 's> {
+    type Item = &'s str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let m = match self.matches.next() {
+            Some(m) => m,
+            None => {
+                if let Some(ps) = self.pending_separator.take() {
+                    return Some(ps);
+                }
+                if !self.remaining.is_empty() {
+                    let retval = self.remaining;
+                    self.remaining = "";
+                    return Some(retval);
+                } else {
+                    return None;
+                }
+            }
+        };
+        let retval = &self.remaining[..m.start()];
+        self.remaining = &self.remaining[m.end()..];
+        self.pending_separator = Some(m.as_str());
+        Some(retval)
+    }
+}
+
+trait RegexSplitInclusiveTrait {
+    fn split_inclusive<'r, 's>(&'r self, text: &'s str) -> RegexSplitInclusive<'r, 's>;
+}
+
+impl RegexSplitInclusiveTrait for Regex {
+    fn split_inclusive<'r, 's>(&'r self, text: &'s str) -> RegexSplitInclusive<'r, 's> {
+        RegexSplitInclusive::new(self, text)
+    }
+}
 #[cfg(test)]
 mod test {
     use super::*;
@@ -325,5 +374,21 @@ mod test {
         let sents = segment("zh", "安永已聯繫周怡安親屬，協助辦理簽證相關事宜，周怡安家屬1月1日晚間搭乘東方航空班機抵達上海，他們步入入境大廳時 神情落寞、不發一語。周怡安來自台中，去年剛從元智大學畢業，同年9月加入安永。")?;
         assert_eq!(sents.len(), 2);
         Ok(())
+    }
+    #[test]
+    fn test_regex_split_inclusive() {
+        let single_line: Vec<&str> = CONSECUTIVE_NEWLINES_REGEX
+            .split_inclusive("This is just a single sentence")
+            .collect();
+        assert!(!single_line.is_empty());
+        assert!(!single_line[0].is_empty());
+        let two_lines_no_split: Vec<&str> = CONSECUTIVE_NEWLINES_REGEX
+            .split_inclusive("First line\nSecond line\n")
+            .collect();
+        assert_eq!(two_lines_no_split.len(), 1);
+        let two_lines_with_split: Vec<&str> = CONSECUTIVE_NEWLINES_REGEX
+            .split_inclusive("First line\n\nSecond line")
+            .collect();
+        assert_eq!(two_lines_with_split.len(), 3);
     }
 }

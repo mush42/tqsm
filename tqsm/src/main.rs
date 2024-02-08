@@ -4,7 +4,6 @@ use std::fs::File;
 use std::io::{self, prelude::*};
 use std::path::PathBuf;
 
-
 fn main() -> Result<()> {
     let mut args = Cli::parse();
     let language = args.language.clone().unwrap();
@@ -34,11 +33,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn tqsm_main(
-    language: &str,
-    args: &Cli,
-    input_text: String,
-) -> anyhow::Result<()> {
+fn tqsm_main(language: &str, args: &Cli, input_text: String) -> anyhow::Result<()> {
     let mut sentences: String = String::new();
     if args.input_file.is_none() {
         let input = input_text;
@@ -48,7 +43,7 @@ fn tqsm_main(
     } else {
         let mut line_sentences = String::new();
         for input_line in input_text.lines() {
-            let sents = libtqsm::segment(language, &input_line)?.join("\r\n");
+            let sents = libtqsm::segment(language, input_line)?.join("\r\n");
             if args.output_file.is_none() {
                 write_to_stdout(&sents)?;
             } else {
@@ -69,7 +64,6 @@ fn tqsm_main(
     Ok(())
 }
 
-
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -80,7 +74,7 @@ struct Cli {
     #[arg(short, long, value_name = "OUTPUT_FILE")]
     output_file: Option<PathBuf>,
     /// Language  (default `en`)
-    #[arg(short, long, value_name = "LANG", default_value = "en") ]
+    #[arg(short, long, value_name = "LANG", default_value = "en")]
     language: Option<String>,
     /// Use interactive mode (useful for testing)
     #[arg(short, long)]

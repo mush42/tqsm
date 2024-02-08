@@ -1,14 +1,10 @@
-use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
-
+use pyo3::prelude::*;
 
 /// Segment given text.
 #[pyfunction]
 fn segment(lang_code: &str, text: &str) -> PyResult<Vec<String>> {
-    libtqsm::segment(lang_code, text)
-        .map_err(|e| {
-            PyRuntimeError::new_err(e.to_string())
-        })
+    libtqsm::segment(lang_code, text).map_err(|e| PyRuntimeError::new_err(e.to_string()))
 }
 
 /// Sentence segmentation.
