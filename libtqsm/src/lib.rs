@@ -55,7 +55,42 @@ pub fn segment(lang_code: &str, text: &str) -> Result<Vec<String>> {
     Ok(language.segment(text))
 }
 
-fn get_language(lang_code: &str) -> Option<&(dyn Language + Send + Sync + 'static)> {
+pub struct IncrementalSegmenter {
+    language: &'static (dyn Language + Send + Sync),
+    buffer: String,
+}
+
+impl IncrementalSegmenter {
+    pub fn new<S: AsRef<str>>(lang_code: S) -> Result<Self> {
+        let language = match get_language(lang_code.as_ref()) {
+            Some(language) => language,
+            None => bail!("Language `{}` not supported", lang_code.as_ref()),
+        };
+
+        Ok(IncrementalSegmenter {
+            language,
+            buffer: String::new(),
+        })
+    }
+
+    // Accumulate text and return a completed sentence if boundary is detected
+    pub fn accept_text(&mut self, text: &str) -> Option<String> {
+        self.buffer.push_str(text);
+
+        let segments = self.language.segment(&format!("{} 1", self.buffer));
+        if segments.len() > 1 {
+            let completed_segment = segments[..segments.len() - 1].join("");
+            self.buffer = self.buffer[completed_segment.len()..].to_string();
+            return Some(completed_segment);
+        }
+        None
+    }
+    pub fn get_partial(&mut self) -> String {
+        std::mem::take(&mut self.buffer)
+    }
+}
+
+fn get_language(lang_code: &str) -> Option<&'static (dyn Language + Send + Sync)> {
     let mut ret_lang = LANGUAGE_REGISTRY.get(lang_code).copied();
     if ret_lang.is_none() {
         let fallbacks = LANGUAGE_FALLBACKS
@@ -152,7 +187,7 @@ pub trait Language {
         text_after_boundary
             .chars()
             .next()
-            .map_or(false, |c| c.is_ascii_lowercase() || c.is_ascii_digit())
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
     }
 
     fn get_skippable_ranges(&self, text: &str) -> Vec<(usize, usize)> {
@@ -296,7 +331,7 @@ impl<'r, 's> RegexSplitInclusive<'r, 's> {
     }
 }
 
-impl<'r, 's> std::iter::Iterator for RegexSplitInclusive<'r, 's> {
+impl<'s> std::iter::Iterator for RegexSplitInclusive<'_, 's> {
     type Item = &'s str;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -390,5 +425,16 @@ mod test {
             .split_inclusive("First line\n\nSecond line")
             .collect();
         assert_eq!(two_lines_with_split.len(), 3);
+    }
+    #[test]
+    fn test_incremental_segmentor() -> Result<()> {
+        let mut inc_seg = IncrementalSegmenter::new("en")?;
+        let feed1 = inc_seg.accept_text("Hello");
+        assert!(feed1.is_none());
+        let feed2 = inc_seg.accept_text("there. This is");
+        assert!(feed2.is_some());
+        let partial_t = inc_seg.get_partial();
+        assert_eq!(partial_t.trim(), "This is");
+        Ok(())
     }
 }
