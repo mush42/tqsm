@@ -90,7 +90,7 @@ impl IncrementalSegmenter {
     }
 }
 
-fn get_language(lang_code: &str) -> Option<&'static (dyn Language + Send + Sync)> {
+pub fn get_language(lang_code: &str) -> Option<&'static (dyn Language + Send + Sync)> {
     let mut ret_lang = LANGUAGE_REGISTRY.get(lang_code).copied();
     if ret_lang.is_none() {
         let fallbacks = LANGUAGE_FALLBACKS
@@ -119,11 +119,14 @@ pub struct GraphemeCursor {
 }
 
 impl GraphemeCursor {
-    fn next_grapheme(&self, pos: usize) -> Option<usize> {
+    pub fn new(grapheme_offsets: Vec<usize>) -> Self {
+        Self { grapheme_offsets }
+    }
+    pub fn next_grapheme(&self, pos: usize) -> Option<usize> {
         self.grapheme_offsets.iter().find(|p| **p > pos).copied()
     }
     #[allow(dead_code)]
-    fn prev_grapheme(&self, pos: usize) -> Option<usize> {
+    pub fn prev_grapheme(&self, pos: usize) -> Option<usize> {
         self.grapheme_offsets
             .iter()
             .rev()
